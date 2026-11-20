@@ -24,6 +24,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pytest -q
       - run: python global_probe.py
+      - run: python expanded_test.py
       - run: python screener.py
       - uses: actions/upload-artifact@v4
         if: always()
