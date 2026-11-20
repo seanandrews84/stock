@@ -1,0 +1,21 @@
+symbol,exchange,country,instrument_type
+CBA.AX,ASX,Australia,stock
+BHP.AX,ASX,Australia,stock
+WES.AX,ASX,Australia,stock
+CSL.AX,ASX,Australia,stock
+RIO.AX,ASX,Australia,stock
+7203.T,TSE,Japan,stock
+6758.T,TSE,Japan,stock
+9984.T,TSE,Japan,stock
+8306.T,TSE,Japan,stock
+AZN.L,LSE,United Kingdom,stock
+SHEL.L,LSE,United Kingdom,stock
+HSBA.L,LSE,United Kingdom,stock
+SAP.DE,XETRA,Germany,stock
+SIE.DE,XETRA,Germany,stock
+ASML.AS,Euronext,Netherlands,stock
+SHOP.TO,TSX,Canada,stock
+RY.TO,TSX,Canada,stock
+TD.TO,TSX,Canada,stock
+0700.HK,HKEX,Hong Kong,stock
+NESN.SW,SIX,Switzerland,stock
