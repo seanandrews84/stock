@@ -1,8 +1,13 @@
 name: International stock screener pilot
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/daily.yml'
+      - 'screener.py'
+      - 'test_screener.py'
   schedule:
-    # UTC 22:00 Mon-Fri = 06:00 Tue-Sat Australia/Perth (no DST)
+    # UTC 22:00 Monday-Friday = 06:00 Tuesday-Saturday Perth
     - cron: '0 22 * * 1-5'
 permissions:
   contents: read
