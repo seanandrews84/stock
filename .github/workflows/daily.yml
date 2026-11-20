@@ -23,9 +23,13 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pytest -q
-      - run: python global_probe.py
-      - run: python expanded_test.py
-      - run: python screener.py
+      - name: Historical international equities scan
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            python full_scan.py --asof-perth 2026-11-20T06:00:00+08:00
+          else
+            python full_scan.py
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
