@@ -23,3 +23,11 @@ def test_supertrend_length():
     directions,values=supertrend(df)
     assert len(directions)==20
     assert pd.isna(values.iloc[0])
+
+def test_tradingview_strong_buy_threshold():
+    from full_scan import is_tv_strong_buy
+    assert is_tv_strong_buy(0.50001)
+    assert is_tv_strong_buy(0.75)
+    assert is_tv_strong_buy(1.0)
+    for score in (0.5,0.49,0.0,-0.5,None,float("nan"),1.01,""):
+        assert not is_tv_strong_buy(score)
