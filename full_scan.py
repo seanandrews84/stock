@@ -87,6 +87,8 @@ def scan_one(item,cutoff):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--asof-perth",default=None)
+    parser.add_argument("--shard-number",type=int,default=0)
+    parser.add_argument("--shards",type=int,default=1)
     args=parser.parse_args()
     cutoff=(datetime.fromisoformat(args.asof_perth) if args.asof_perth else datetime.now(ZoneInfo("Australia/Perth")))
     if cutoff.tzinfo is None:raise ValueError("--asof-perth must include timezone offset")
@@ -97,7 +99,9 @@ def main():
     cutoff=cutoff.replace(hour=6,minute=0,second=0,microsecond=0)
     root=Path("reports");root.mkdir(exist_ok=True)
     allrows={};markets=[]
-    for market in MARKETS:
+    if args.shards<1 or args.shard_number<0 or args.shard_number>=args.shards:raise ValueError("invalid shard configuration")
+    selected_markets=[m for i,m in enumerate(MARKETS) if i%args.shards==args.shard_number]
+    for market in selected_markets:
         rows,stat=fetch_market(market)
         markets.append(stat)
         for row in rows:
@@ -112,7 +116,7 @@ def main():
         print("MARKET",market,stat,"ADDED_TOTAL",len(allrows),flush=True)
     data=[];errors=[]
     print("PRICE_HISTORY_START",len(allrows),flush=True)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         futures=[pool.submit(scan_one,x,cutoff) for x in allrows.items()]
         for ix,fut in enumerate(concurrent.futures.as_completed(futures),1):
             result=fut.result()
@@ -125,6 +129,7 @@ def main():
     # local/USD FX snapshot stored, so the USD 1m condition is NOT validated.
     technical.sort(key=lambda x:x.get("rsi14",0),reverse=True)
     out={
+      "shard_number":args.shard_number,"shards_total":args.shards,
       "asof_perth":cutoff.isoformat(),
       "generated_utc":datetime.now(timezone.utc).isoformat(),
       "screen_type":"BROAD_HISTORICAL_EQUITY_ATTEMPT_NOT_FULL_COVERAGE",
@@ -145,7 +150,7 @@ def main():
          "TradingView 10,3 Supertrend calculation parity remains unvalidated.",
          "Data source is unofficial and availability can change."],
       "history_errors":errors}
-    (root/"full_equity_attempt.json").write_text(json.dumps(out,indent=2,default=str))
+    (root/f"full_equity_attempt_shard{args.shard_number}.json").write_text(json.dumps(out,indent=2,default=str))
     md=["# Broad international equities screen",f"As of Perth: {cutoff.isoformat()}",
        "**NOT COMPLETE; technical-only signals, NOT broker-verified investment recommendations.**",
        f"Markets successfully retrieved: {out['markets_success']}/{len(markets)}",
@@ -156,7 +161,7 @@ def main():
     md += [f"- {x.get('ticker','')} ({x['symbol']}) | {x.get('description','')} | {x['market']} | {x['session']} | close {x['close']} {x.get('currency','')} | RSI {x['rsi14']} | +{round(100*(x['close']/x['sma150']-1),2)}% over SMA150 | current market cap (USD estimate) {x.get('market_cap_basic')} | **broker unverified**" for x in technical] or ["None with validated complete histories."]
     md += ["## Market errors"]+[f"- {m['market']}: {m['error']}" for m in markets if not m["complete"]]
     md += ["## Important limitations"]+out["limitations"]
-    (root/"full_equity_attempt.md").write_text("\n\n".join(md))
-    print("FULL_RESULT",json.dumps({"asof":out["asof_perth"],"markets_success":out["markets_success"],"market_errors":out["market_errors"],"universe":len(allrows),"analysed":len(data),"failed_or_stale":len(errors),"matches":technical[:60],"total_matches":len(technical)},default=str),flush=True)
+    (root/f"full_equity_attempt_shard{args.shard_number}.md").write_text("\n\n".join(md))
+    print("FULL_RESULT",json.dumps({"shard":args.shard_number,"asof":out["asof_perth"],"markets_success":out["markets_success"],"market_errors":out["market_errors"],"universe":len(allrows),"analysed":len(data),"failed_or_stale":len(errors),"matches":technical[:60],"total_matches":len(technical)},default=str),flush=True)
     if not data:raise SystemExit("No valid price histories")
 if __name__=="__main__":main()
