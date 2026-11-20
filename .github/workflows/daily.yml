@@ -1,0 +1,27 @@
+name: International stock screener pilot
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC 22:00 Mon-Fri = 06:00 Tue-Sat Australia/Perth (no DST)
+    - cron: '0 22 * * 1-5'
+permissions:
+  contents: read
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+      - run: python screener.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: international-screener-pilot-report
+          path: reports/
+          retention-days: 30
