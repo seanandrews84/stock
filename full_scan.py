@@ -52,7 +52,7 @@ def fetch_market(market):
               .set_property("price_conversion",{"to_currency":"usd"})
               .where(Column("type")=="stock",Column("is_primary")==True,
                      Column("market_cap_basic")>=1_000_000_000)
-              .offset(offset).limit(PAGE))
+              .offset(offset).limit(offset+PAGE))
             result_count,frame=query.get_scanner_data()
             total=int(result_count)
             rows.extend(frame.to_dict("records"))
