@@ -1,13 +1,14 @@
-name: International stock screener pilot
+name: International stock screener (sharded test)
 on:
   workflow_dispatch:
   push:
     paths:
       - '.github/workflows/daily.yml'
+      - 'full_scan.py'
       - 'screener.py'
       - 'test_screener.py'
   schedule:
-    # UTC 22:00 Monday-Friday = 06:00 Tuesday-Saturday Perth
+    # 06:00 Tue-Sat Perth = 22:00 Mon-Fri UTC
     - cron: '0 22 * * 1-5'
 permissions:
   contents: read
@@ -15,6 +16,10 @@ jobs:
   screen:
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,16 +28,16 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pytest -q
-      - name: Historical international equities scan
+      - name: Historical international equities scan shard ${{ matrix.shard }}
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            python full_scan.py --asof-perth 2026-11-20T06:00:00+08:00
+            python full_scan.py --shards 8 --shard-number ${{ matrix.shard }} --asof-perth 2026-11-20T06:00:00+08:00
           else
-            python full_scan.py
+            python full_scan.py --shards 8 --shard-number ${{ matrix.shard }}
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: international-screener-pilot-report
+          name: international-screener-shard-${{ matrix.shard }}
           path: reports/
           retention-days: 30
