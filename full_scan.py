@@ -22,6 +22,15 @@ MARKETS=[
 SUFFIX={"australia":".AX","canada":".TO","uk":".L","germany":".DE","france":".PA","japan":".T","hongkong":".HK","korea":".KS","india":".NS","switzerland":".SW","netherlands":".AS","italy":".MI","spain":".MC","sweden":".ST","singapore":".SI","brazil":".SA","mexico":".MX","taiwan":".TW","newzealand":".NZ","norway":".OL","denmark":".CO","finland":".HE","belgium":".BR","poland":".WA","portugal":".LS","austria":".VI","ireland":".IR","indonesia":".JK","malaysia":".KL","thailand":".BK","philippines":".PS","vietnam":".VN","saudiarabia":".SR","turkey":".IS","israel":".TA","unitedarabemirates":".AE","chile":".SN","argentina":".BA","colombia":".CL","peru":".LM","southafrica":".JO"}
 PAGE=1000
 MAX=20000
+# TradingView daily composite Technical Rating: Strong Buy if score > 0.5.
+STRONG_BUY_THRESHOLD=0.5
+
+def is_tv_strong_buy(value):
+    try:
+        score=float(value)
+        return math.isfinite(score) and 0.5 < score <= 1.0
+    except (TypeError, ValueError):
+        return False
 
 def ticker_map(row,market):
     ticker=str(row.get("ticker",""))
@@ -48,10 +57,11 @@ def fetch_market(market):
         try:
             query=(Query().set_markets(market)
               .select("name","description","type","country","exchange","is_primary",
-                "market_cap_basic","close","currency","SMA150","RSI","sector","average_volume_30d_calc")
+                "market_cap_basic","close","currency","SMA150","RSI","Recommend.All","sector","average_volume_30d_calc")
               .set_property("price_conversion",{"to_currency":"usd"})
               .where(Column("type")=="stock",Column("is_primary")==True,
-                     Column("market_cap_basic")>=1_000_000_000)
+                     Column("market_cap_basic")>=1_000_000_000,
+                     Column("Recommend.All")>STRONG_BUY_THRESHOLD)
               .offset(offset).limit(offset+PAGE))
             result_count,frame=query.get_scanner_data()
             total=int(result_count)
@@ -107,6 +117,7 @@ def main():
         for row in rows:
             if str(row.get("country","")).strip().lower()=="united states":continue
             if row.get("is_primary") is not True:continue
+            if not is_tv_strong_buy(row.get("Recommend.All")):continue
             key=ticker_map(row,market)
             if not key:continue
             # Retain TV's USD-converted cap; this is a current-screen estimate,
@@ -124,7 +135,7 @@ def main():
                 data.append(result)
             else:errors.append(result)
             if ix%500==0:print("HISTORY_PROGRESS",ix,len(allrows),"ok",len(data),"errors",len(errors),flush=True)
-    technical=[x for x in data if x["technical_pass"]]
+    technical=[x for x in data if x["technical_pass"] and is_tv_strong_buy(x.get("Recommend.All"))]
     # Conservative liquidity: quote currency from TradingView. No reliable
     # local/USD FX snapshot stored, so the USD 1m condition is NOT validated.
     technical.sort(key=lambda x:x.get("rsi14",0),reverse=True)
@@ -133,6 +144,7 @@ def main():
       "asof_perth":cutoff.isoformat(),
       "generated_utc":datetime.now(timezone.utc).isoformat(),
       "screen_type":"BROAD_HISTORICAL_EQUITY_ATTEMPT_NOT_FULL_COVERAGE",
+      "tradingview_technical_rating_required":"Strong Buy (daily Recommend.All > 0.5)",
       "markets":markets,
       "markets_success":sum(x["complete"] for x in markets),
       "market_errors":sum(not x["complete"] for x in markets),
@@ -144,6 +156,7 @@ def main():
       "limitations":[
          "Today's market-cap prefilter is not historical as-of 06:00; 2026-11-20 06:00 replay is approximated.",
          "No exhaustive exchange/ETF universe; ETF AUM not screened.",
+         "TradingView Strong Buy score is fetched LIVE; it is not a historical 06:00 rating for replay tests.",
          "ETF/SPAC classification beyond is_primary/type not definitively checked.",
          "30-day USD traded value and exact broker purchase accessibility are NOT verified.",
          "TradingView/Yahoo ticker mapping sometimes mismatches and may cause failures.",
@@ -157,11 +170,13 @@ def main():
        f"Unique primary-listing equities prequalified: {len(allrows)}",
        f"Valid completed historical analyses: {len(data)}, unavailable/stale: {len(errors)}",
        f"Fresh bullish technical matches: {len(technical)}",
+       "TradingView daily Strong Buy is mandatory (Recommend.All > 0.5).",
+       "Historical replay caveat: TradingView rating is fetched LIVE, not as-of the 06:00 cutoff.",
        "## Technical-only review candidates"]
-    md += [f"- {x.get('ticker','')} ({x['symbol']}) | {x.get('description','')} | {x['market']} | {x['session']} | close {x['close']} {x.get('currency','')} | RSI {x['rsi14']} | +{round(100*(x['close']/x['sma150']-1),2)}% over SMA150 | current market cap (USD estimate) {x.get('market_cap_basic')} | **broker unverified**" for x in technical] or ["None with validated complete histories."]
+    md += [f"- {x.get('ticker','')} ({x['symbol']}) | {x.get('description','')} | {x['market']} | {x['session']} | close {x['close']} {x.get('currency','')} | RSI {x['rsi14']} | TV Strong Buy {x.get('Recommend.All')} | +{round(100*(x['close']/x['sma150']-1),2)}% over SMA150 | current market cap (USD estimate) {x.get('market_cap_basic')} | **broker unverified**" for x in technical] or ["None with validated complete histories."]
     md += ["## Market errors"]+[f"- {m['market']}: {m['error']}" for m in markets if not m["complete"]]
     md += ["## Important limitations"]+out["limitations"]
     (root/f"full_equity_attempt_shard{args.shard_number}.md").write_text("\n\n".join(md))
-    print("FULL_RESULT",json.dumps({"shard":args.shard_number,"asof":out["asof_perth"],"markets_success":out["markets_success"],"market_errors":out["market_errors"],"universe":len(allrows),"analysed":len(data),"failed_or_stale":len(errors),"matches":technical[:60],"total_matches":len(technical)},default=str),flush=True)
+    print("FULL_RESULT",json.dumps({"shard":args.shard_number,"asof":out["asof_perth"],"markets_success":out["markets_success"],"market_errors":out["market_errors"],"universe":len(allrows),"analysed":len(data),"failed_or_stale":len(errors),"matches":technical[:60],"total_matches":len(technical),"strong_buy_required":True},default=str),flush=True)
     if not data:raise SystemExit("No valid price histories")
 if __name__=="__main__":main()
