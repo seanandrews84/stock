@@ -36,3 +36,7 @@ try:
  print("ETF_PROBE_FILTERED",len(f),list(f.columns),f.head(4).to_dict("records"),flush=True)
 except Exception as e:
  print("ETF_PROBE_FILTERED_ERROR",repr(e)[:1000],flush=True)
+
+print("ETF_PROBE_RATING_FIELDS",[x.name for x in StockField.search("rating")],flush=True)
+print("ETF_PROBE_RECOMMEND_ALL",[x.name for x in StockField.search("recommend") if "ALL" in x.name],flush=True)
+print("ETF_PROBE_RSI_FIELDS",[x.name for x in StockField.search("rsi")][:20],flush=True)
