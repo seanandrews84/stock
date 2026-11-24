@@ -43,3 +43,25 @@ def test_stale_data_never_passes(monkeypatch):
     monkeypatch.setattr(pipeline.time,"sleep",lambda duration:None)
     result,error=get_bars("TEST.X","2026-11-23")
     assert result is None and "stale-session" in error
+
+def test_provider_market_aliases():
+    from pipeline import PROVIDER_MARKETS
+    assert PROVIDER_MARKETS["southafrica"]=="rsa"
+    assert PROVIDER_MARKETS["saudiarabia"]=="ksa"
+    assert PROVIDER_MARKETS["unitedarabemirates"]=="uae"
+
+def test_calendar_registry_graceful_fallback():
+    import pipeline
+    # Registry-derived calendars don't silently invent sessions.
+    assert "newzealand" in pipeline.CALENDAR_ALIASES
+    assert "mexico" in pipeline.CALENDAR_ALIASES
+
+def test_broker_requires_specific_proof(tmp_path,monkeypatch):
+    import pipeline
+    (tmp_path/"data").mkdir()
+    (tmp_path/"data"/"broker_verified.csv").write_text(
+        "symbol,broker,verified_date,evidence_url,outright_buy_confirmed\n"
+        "ABC.X,etoro,2026-11-24,https://www.etoro.com/markets/abc.x,no\n")
+    monkeypatch.setattr(pipeline,"ROOT",tmp_path)
+    now=datetime(2026,11,24,tzinfo=ZoneInfo("Australia/Perth"))
+    assert pipeline.eligible_brokers("ABC.X",now)==[]
