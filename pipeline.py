@@ -205,7 +205,7 @@ def scan_ticker(item, expected_date, asof):
     ticker,meta=item
     df,error=get_bars(ticker,expected_date)
     if error:
-        return {"status":"missing","symbol":ticker,"market":meta["market"],"reason":error}
+        return {"status":"missing","symbol":ticker,"market":meta["market"],"kind":meta.get("_kind"),"reason":error}
     try:
         t=evaluate_prices(df)
         daily_rate=meta.get("Recommend.All")
@@ -213,13 +213,15 @@ def scan_ticker(item, expected_date, asof):
             try:
                 daily_rate=tv_daily_etf_rating(str(meta.get("ticker")),meta["market"])
             except Exception as ex:
-                return {"status":"missing","symbol":ticker,"market":meta["market"],"reason":"etf-daily-rating-unavailable:"+str(ex)[:95]}
+                return {"status":"missing","symbol":ticker,"market":meta["market"],"kind":meta.get("_kind"),"reason":"etf-daily-rating-unavailable:"+str(ex)[:95]}
         if t["technical_pass"] and not is_tv_strong_buy(daily_rate):
-            return {"status":"not-strong-buy","symbol":ticker,"market":meta["market"],"reason":"TradingView daily rating failed or unavailable"}
+            return {"status":"not-strong-buy","symbol":ticker,"market":meta["market"],"kind":meta.get("_kind"),"reason":"TradingView daily rating failed or unavailable"}
         currency=meta.get("currency") or ("USD" if ticker.endswith(".USD") else "")
         if not currency and t["technical_pass"]:
             try:currency=str(yf.Ticker(ticker).fast_info.currency or "").upper()
             except Exception:currency=""
+        if t["technical_pass"] and t["sma150"]>0 and t["close"]/t["sma150"]>5:
+            return {"status":"suspect-corporate-action","symbol":ticker,"market":meta["market"],"kind":meta.get("_kind"),"reason":"price >5x SMA150; probable unadjusted split/corporate-action distortion"}
         turnover=valid_usd_turnover(df,currency) if t["technical_pass"] else None
         brokers=eligible_brokers(str(meta.get("ticker","")),asof)
         # Alias based on Yahoo's symbol is also allowed, but must match
@@ -239,7 +241,7 @@ def scan_ticker(item, expected_date, asof):
         }
         return result
     except Exception as exc:
-        return {"status":"missing","symbol":ticker,"market":meta["market"],
+        return {"status":"missing","symbol":ticker,"market":meta["market"],"kind":meta.get("_kind"),
                 "reason":"calculation:"+str(exc)[:150]}
 
 def query_market(market,kind):
@@ -313,6 +315,7 @@ def run(args):
         "asof_perth":asof.isoformat(),"shard":args.shard_number,"shards":args.shards,
         "discovery":discovery,"calendar_errors":calendar_errors,
         "prequalified_mapped_count":len(selected),"price_histories_valid":len(results),
+        "instrument_coverage":{kind:{"mapped":sum(x.get("_kind")==kind for x in selected.values()),"valid":sum(x.get("instrument_type")==kind for x in results),"failed":sum(x.get("kind")==kind for x in missing)} for kind in ("stock","etf")},
         "price_histories_failed":len(missing),"technical_signals":technical,
         "liquidity_pass_signals":liquidity_qualified,
         "verified_opportunities":opportunities,"failures":missing,
