@@ -1,14 +1,18 @@
-name: International stock screener (sharded test)
+name: International stock screener — morning review
 on:
   workflow_dispatch:
   push:
     paths:
       - '.github/workflows/daily.yml'
+      - 'pipeline.py'
+      - 'consolidate.py'
+      - 'test_pipeline.py'
       - 'full_scan.py'
       - 'screener.py'
-      - 'test_screener.py'
+      - 'data/broker_verified.csv'
+      - 'requirements.txt'
   schedule:
-    # 06:00 Tue-Sat Perth = 22:00 Mon-Fri UTC
+    # 06:00 Perth Tue-Sat = 22:00 UTC Mon-Fri; GitHub may delay scheduled starts.
     - cron: '0 22 * * 1-5'
 permissions:
   contents: read
@@ -27,17 +31,40 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -r requirements.txt
-      - run: pytest -q
-      - name: Historical international equities scan shard ${{ matrix.shard }}
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            python full_scan.py --shards 8 --shard-number ${{ matrix.shard }} --asof-perth 2026-11-20T06:00:00+08:00
-          else
-            python full_scan.py --shards 8 --shard-number ${{ matrix.shard }}
-          fi
+      - name: Unit and regression tests
+        run: pytest -q
+      - name: Screen international stocks and ETFs — shard ${{ matrix.shard }}
+        run: python pipeline.py --shards 8 --shard-number ${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: international-screener-shard-${{ matrix.shard }}
-          path: reports/
+          name: international-shard-${{ matrix.shard }}
+          path: reports/screen_shard_*.json
+          if-no-files-found: warn
+          retention-days: 30
+  summary:
+    if: always()
+    needs: screen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: international-shard-*
+          path: shard_downloads
+          merge-multiple: false
+      - name: Consolidate into one US-style report and audit coverage
+        run: python consolidate.py
+      - name: Publish report into GitHub run summary
+        run: cat reports/latest.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: international-morning-report
+          path: |
+            reports/latest.md
+            reports/latest.json
           retention-days: 30
