@@ -23,6 +23,18 @@ from full_scan import MARKETS, ticker_map, is_tv_strong_buy
 from screener import evaluate_prices
 
 ROOT = Path(__file__).resolve().parent
+PROVIDER_MARKETS={"saudiarabia":"ksa","southafrica":"rsa","unitedarabemirates":"uae"}
+# Calendar candidates are checked against the library registry at runtime.
+CALENDAR_ALIASES={
+ "mexico":["XMEX"],"newzealand":["XNZE"],"italy":["XMIL"],
+ "indonesia":["XIDX"],"spain":["XMAD"],"denmark":["XCSE"],
+ "finland":["XHEL"],"thailand":["XBKK"],"singapore":["XSES"],
+ "philippines":["XPHS"],"poland":["XWAR"],"israel":["TASE","XTAE"],
+ "turkey":["XIST"],"southafrica":["XJSE"],
+ "portugal":["XLIS"],"ireland":["XDUB"],"vietnam":["XHCM"],
+ "chile":["XSGO"],"colombia":["XBOG"],"peru":["XLIM"],
+ "argentina":["XBUE"],"saudiarabia":["XSAU"],"unitedarabemirates":["XDFM"]
+}
 CALENDARS = {
  "australia":"ASX","canada":"TSX","uk":"LSE","germany":"XETR",
  "france":"EUREX","japan":"JPX","hongkong":"HKEX","india":"NSE",
@@ -46,9 +58,12 @@ FX_LOCK = Lock()
 
 def previous_completed_session(market, cutoff):
     """Return an expected close DATE; None means unverified calendar."""
-    name = CALENDARS.get(market)
+    candidates=[CALENDARS[market]] if market in CALENDARS else []
+    candidates+=CALENDAR_ALIASES.get(market,[])
+    registered=set(mcal.get_calendar_names())
+    name=next((c for c in candidates if c in registered),None)
     if not name:
-        return None, "no supported exchange calendar"
+        return None, "no verified exchange calendar in installed registry"
     try:
         cal = mcal.get_calendar(name)
         schedule = cal.schedule(start_date=(cutoff-timedelta(days=15)).date(),
@@ -177,8 +192,8 @@ def query_market(market,kind):
     for offset in range(0,MAX_ROWS_PER_MARKET,PAGE_SIZE):
         try:
             fields=["name","description","type","country","exchange","is_primary",
-                    "close","currency","Recommend.All","sector","average_volume_30d_calc"]
-            query=(Query().set_markets(market).set_property("price_conversion",{"to_currency":"usd"}))
+                    "close","currency","Recommend.All","sector","average_volume_30d_calc","subtype"]
+            query=(Query().set_markets(PROVIDER_MARKETS.get(market,market)).set_property("price_conversion",{"to_currency":"usd"}))
             if kind=="stock":
                 fields.append("market_cap_basic")
                 query=query.where(Column("type")=="stock",Column("is_primary")==True,
@@ -186,7 +201,7 @@ def query_market(market,kind):
                                   Column("Recommend.All")>0.5)
             else:
                 fields.append("fund_total_assets")
-                query=query.where(Column("type")=="fund",Column("is_primary")==True,
+                query=query.where(Column("type")=="fund",Column("subtype")=="etf",Column("is_primary")==True,
                                   Column("fund_total_assets")>=100_000_000,
                                   Column("Recommend.All")>0.5)
             query=query.select(*fields).offset(offset).limit(offset+PAGE_SIZE)
@@ -218,6 +233,7 @@ def run(args):
             if cal_error:continue
             for row in rows:
                 if row.get("is_primary") is not True:continue
+                if kind=="etf" and str(row.get("subtype","")).lower()!="etf":continue
                 if str(row.get("country","")).strip().lower() in ("united states","usa"):continue
                 if not is_tv_strong_buy(row.get("Recommend.All")):continue
                 symbol=ticker_map(row,market)
