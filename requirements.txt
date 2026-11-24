@@ -4,3 +4,4 @@ numpy>=1.26,<3
 pytest>=8,<10
 tradingview-screener>=3,<5
 pandas-market-calendars>=4.4,<6
+tvscreener>=0.8,<2
