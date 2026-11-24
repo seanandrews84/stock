@@ -23,3 +23,16 @@ for k in ("AUSTRALIA","CANADA","UK","JAPAN","GERMANY"):
   f=e.get()
   print("ETF_PROBE_MARKET",k,len(f),f.head(2).to_dict("records"),flush=True)
  except Exception as ex:print("ETF_PROBE_MARKET",k,"ERROR",repr(ex)[:300],flush=True)
+
+print("ETF_PROBE_FIELDS",[(k,hasattr(StockField,k)) for k in ("RECOMMEND_ALL","RSI","CURRENCY","AUM","EXCHANGE","NAME","DESCRIPTION","PRICE","SYMBOL")],flush=True)
+try:
+ e=(ETFScreener().set_markets(Market.AUSTRALIA)
+    .where(StockField.AUM>=100_000_000)
+    .where(StockField.RECOMMEND_ALL>0.5)
+    .select(StockField.NAME,StockField.DESCRIPTION,StockField.AUM,
+            StockField.RECOMMEND_ALL,StockField.CURRENCY,StockField.RSI,StockField.PRICE)
+    .set_range(0,8))
+ f=e.get()
+ print("ETF_PROBE_FILTERED",len(f),list(f.columns),f.head(4).to_dict("records"),flush=True)
+except Exception as e:
+ print("ETF_PROBE_FILTERED_ERROR",repr(e)[:1000],flush=True)
