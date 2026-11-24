@@ -35,7 +35,9 @@ jobs:
         run: pytest -q
       - name: Diagnose ETF provider fields (test only)
         if: github.event_name == 'push' && matrix.shard == 0
-        run: python diagnose_etfs.py
+        run: |
+          python diagnose_etfs.py
+          python etf_probe.py
       - name: Screen international stocks and ETFs — shard ${{ matrix.shard }}
         run: python pipeline.py --shards 8 --shard-number ${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
