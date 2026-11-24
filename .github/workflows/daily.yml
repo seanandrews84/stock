@@ -11,6 +11,7 @@ on:
       - 'screener.py'
       - 'data/broker_verified.csv'
       - 'requirements.txt'
+      - 'etf_probe.py'
   schedule:
     # 06:00 Perth Tue-Sat = 22:00 UTC Mon-Fri; GitHub may delay scheduled starts.
     - cron: '0 22 * * 1-5'
