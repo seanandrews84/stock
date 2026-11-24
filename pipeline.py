@@ -19,6 +19,8 @@ import pandas as pd
 import pandas_market_calendars as mcal
 import yfinance as yf
 from tradingview_screener import Column, Query
+from tvscreener import ETFScreener, StockField, Market as ETFMarket
+from tradingview_ta import TA_Handler, Interval
 from full_scan import MARKETS, ticker_map, is_tv_strong_buy
 from screener import evaluate_prices
 
@@ -53,6 +55,7 @@ PAGE_SIZE = 1000
 MIN_USD_VOLUME = 1_000_000
 BROKER_MAX_AGE_DAYS = 90
 RETRIES = 3
+ETF_MARKET_CAP = 80  # top AUM listings per market; capped markets explicitly reported
 FX_CACHE = {}
 FX_LOCK = Lock()
 
@@ -153,6 +156,51 @@ def get_bars(symbol, expected_date):
         if attempt+1<RETRIES:time.sleep((attempt+1)*1.5)
     return None, ";".join(errors)
 
+
+def query_etfs(market):
+    """The dedicated TradingView ETF endpoint (stock endpoint returns no ETFs).
+
+    This retrieval is deliberately capped to limit unverified/free endpoint loads;
+    markets with >=ETF_MARKET_CAP returned are flagged as partially covered.
+    """
+    market_key=PROVIDER_MARKETS.get(market,market).upper()
+    try:
+        if not hasattr(ETFMarket,market_key):
+            raise ValueError("ETF market enum not supported: "+market_key)
+        scanner=(ETFScreener().set_markets(getattr(ETFMarket,market_key))
+                 .where(StockField.AUM>=100_000_000)
+                 .set_range(0,ETF_MARKET_CAP))
+        frame=scanner.get()
+        records=[]
+        for _,d in frame.iterrows():
+            symbol=str(d.get("Symbol") or "")
+            if ":" not in symbol:continue
+            try:
+                aum=float(d.get("Aum"))
+                if not math.isfinite(aum) or aum<100_000_000:continue
+            except (TypeError,ValueError):continue
+            records.append({"ticker":symbol,"name":symbol.split(":",1)[1],
+                            "description":str(d.get("Description") or d.get("Name") or ""),
+                            "type":"fund","subtype":"etf","fund_total_assets":aum,
+                            "is_primary":True,
+                            # Currency is validated separately from history quote when possible.
+                            "currency":None,"Recommend.All":None})
+        return records,{"market":market,"kind":"etf","retrieved":len(records),
+                        "total":None,"complete":len(frame)<ETF_MARKET_CAP,
+                        "error":"CAPPED_ETF_DISCOVERY" if len(frame)>=ETF_MARKET_CAP else None}
+    except Exception as exc:
+        return [],{"market":market,"kind":"etf","retrieved":0,"total":None,
+                   "complete":False,"error":str(exc)[:220]}
+
+def tv_daily_etf_rating(symbol,market):
+    """Verify daily composite TV rating using the exact TradingView ticker."""
+    exchange,code=symbol.split(":",1)
+    handler=TA_Handler(symbol=code,exchange=exchange,screener=PROVIDER_MARKETS.get(market,market),
+                       interval=Interval.INTERVAL_1_DAY,timeout=12)
+    indicators=handler.get_analysis().indicators
+    score=indicators.get("Recommend.All")
+    return float(score) if is_tv_strong_buy(score) else None
+
 def scan_ticker(item, expected_date, asof):
     ticker,meta=item
     df,error=get_bars(ticker,expected_date)
@@ -161,9 +209,17 @@ def scan_ticker(item, expected_date, asof):
     try:
         t=evaluate_prices(df)
         daily_rate=meta.get("Recommend.All")
-        # Strong Buy is sourced from a LIVE snapshot, not a historical rating.
-        if not is_tv_strong_buy(daily_rate):return {"status":"invalid-rating","symbol":ticker}
-        currency=meta.get("currency","")
+        if meta.get("_kind")=="etf" and t["technical_pass"]:
+            try:
+                daily_rate=tv_daily_etf_rating(str(meta.get("ticker")),meta["market"])
+            except Exception as ex:
+                return {"status":"missing","symbol":ticker,"market":meta["market"],"reason":"etf-daily-rating-unavailable:"+str(ex)[:95]}
+        if t["technical_pass"] and not is_tv_strong_buy(daily_rate):
+            return {"status":"not-strong-buy","symbol":ticker,"market":meta["market"],"reason":"TradingView daily rating failed or unavailable"}
+        currency=meta.get("currency") or ("USD" if ticker.endswith(".USD") else "")
+        if not currency and t["technical_pass"]:
+            try:currency=str(yf.Ticker(ticker).fast_info.currency or "").upper()
+            except Exception:currency=""
         turnover=valid_usd_turnover(df,currency) if t["technical_pass"] else None
         brokers=eligible_brokers(str(meta.get("ticker","")),asof)
         # Alias based on Yahoo's symbol is also allowed, but must match
@@ -176,7 +232,7 @@ def scan_ticker(item, expected_date, asof):
             "sector":meta.get("sector"),"instrument_type":meta.get("_kind"),
             "currency":currency,"market_cap_usd_estimate":meta.get("market_cap_basic"),
             "etf_aum_usd_estimate":meta.get("fund_total_assets"),
-            "tradingview_daily_rating":round(float(daily_rate),4),
+            "tradingview_daily_rating":round(float(daily_rate),4) if daily_rate is not None else None,
             "avg_daily_usd_traded":turnover,"liquidity_pass":is_liquid,
             "broker_verified":brokers,**t,
             "verified_opportunity":bool(t["technical_pass"] and is_liquid and brokers),
@@ -228,14 +284,14 @@ def run(args):
         if cal_error:
             calendar_errors.append({"market":market,"reason":cal_error})
         for kind in ("stock","etf"):
-            rows,state=query_market(market,kind)
+            rows,state=(query_etfs(market) if kind=="etf" else query_market(market,kind))
             discovery.append(state)
             if cal_error:continue
             for row in rows:
                 if row.get("is_primary") is not True:continue
                 if kind=="etf" and str(row.get("subtype","")).lower()!="etf":continue
                 if str(row.get("country","")).strip().lower() in ("united states","usa"):continue
-                if not is_tv_strong_buy(row.get("Recommend.All")):continue
+                if kind=="stock" and not is_tv_strong_buy(row.get("Recommend.All")):continue
                 symbol=ticker_map(row,market)
                 if not symbol:continue
                 row["_kind"]=kind;row["market"]=market;row["_session_expected"]=session
@@ -262,7 +318,8 @@ def run(args):
         "verified_opportunities":opportunities,"failures":missing,
         "limitations":[
          "TradingView Strong Buy rating and market cap/AUM are current, not point-in-time historical.",
-         "TradingView fund classification and fund_total_assets may not cover all exchange-traded ETFs; incomplete endpoints logged.",
+         "ETF discovery uses the dedicated TV ETF screener, with a cap of 80 AUM-ranked ETFs per market; capped markets are NOT complete.",
+         "Daily TradingView Strong Buy for ETFs is verified on technical-only flips using exact TradingView ticker.",
          "No candidates without a valid FX rate, adequate dollar volume or exact broker verification are called opportunities.",
          "Yahoo history attempts are retried, but independently sourced fallback OHLCV is unavailable; stale candles never count as current.",
          "Calendar mappings are verified only where exchange calendar implementation is available.",
