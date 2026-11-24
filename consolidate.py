@@ -38,27 +38,61 @@ summary={"asof_perth":reports[0].get("asof_perth") if reports else None,
          "verified_opportunities":verified}
 summary["coverage_warning"]=bool(len(found)!=8 or coverage<95 or summary["queries_failed"] or calerr)
 (ROOT/"latest.json").write_text(json.dumps(summary,indent=2,default=str))
-lines=["# International Screener — "+str(summary["asof_perth"]),
-       "**Verified opportunities: "+str(len(verified))+"**",
-       "## Ticker / company / confirmed filters"]
-for x in sorted(verified,key=lambda z:z["tv_ticker"]):
-    above=round(100*(x["close"]/x["sma150"]-1),2)
-    lines.append(f"- **{x['tv_ticker']} — {x.get('company')}** ({x['market']}); {x['session']}; close {x['close']} {x['currency']}; Supertrend flip ✓; TradingView Strong Buy {x['tradingview_daily_rating']} ✓; RSI {x['rsi14']} ✓; SMA150 +{above}% ✓; turnover USD {x['avg_daily_usd_traded']:,.0f} ✓; outright broker {','.join(x['broker_verified'])} ✓")
-if not verified:lines.append("**None passed every verified requirement.**")
-lines.append("## Excluded technical signals (not purchase opportunities)")
-for x in sorted(technical,key=lambda z:z["tv_ticker"]):
+# Format matches the US screener: ticker, company, and the confirmed checks.
+# Do not promote technical matches to investment opportunities without broker proof.
+def fmt(value,decimals=2):
+    if value is None:return "Not verified"
+    try:return ("{:,.%df}"%decimals).format(float(value))
+    except (ValueError,TypeError):return "Not verified"
+
+def compact_row(x,category):
+    close=fmt(x.get("close"))
+    currency=x.get("currency") or "?"
+    rsi=fmt(x.get("rsi14"))
+    sma=x.get("sma150")
+    pct=fmt(100*(x["close"]/sma-1))+"%" if sma and x.get("close") is not None else "Not verified"
+    tv=fmt(x.get("tradingview_daily_rating"),3)
+    turnover=fmt(x.get("avg_daily_usd_traded"),0)
+    brokers=", ".join(x.get("broker_verified") or []) or "Not verified"
+    scope=x.get("market") or "?"
+    base=f"| **{x.get('tv_ticker') or x.get('symbol')}** | {x.get('company') or 'Unknown'} | {scope} | ✓ | Strong Buy ({tv}) | {rsi} | +{pct} | {turnover} | {brokers} |"
+    if category=="verified":return base+" Eligible |"
     reasons=[]
-    if not x.get("liquidity_pass"):reasons.append("USD volume below threshold or unverified")
-    if not x.get("broker_verified"):reasons.append("exact broker outright availability unverified")
-    lines.append(f"- {x['tv_ticker']} — {x.get('company')} ({x['market']}), RSI {x['rsi14']}; excluded: {', '.join(reasons)}")
-if not technical:lines.append("None found.")
-lines.extend(["## Coverage",
-              f"- Market/instrument queries: {summary['queries_complete']}/{len(discovery)} complete",
-              f"- Daily price histories: {valid}/{mapped} ({coverage}%)",
-              f"- Failed/stale histories: {failed}; unsupported calendars: {len(calerr)}",
-              f"- Technical-only signals: {len(technical)}; volume-qualified: {len(liquid)}",
-              f"- **Coverage warning: {'YES' if summary['coverage_warning'] else 'NO'}**",
-              "- Important: TradingView ratings and size estimates are live snapshots, not historically archived as-of values.",
-              "- ETF coverage depends on fund data exposed by provider; unavailable ETFs are not assumed scanned."])
-(ROOT/"latest.md").write_text("\n\n".join(lines)+"\n")
+    if not x.get("liquidity_pass"):reasons.append("USD liquidity not passed")
+    if not x.get("broker_verified"):reasons.append("Broker unverified")
+    return base+" Excluded: "+"; ".join(reasons)+" |"
+
+header="| Ticker | Company | Market | Supertrend flip | TradingView | RSI 14 | Above SMA150 | 30d USD traded/day | Broker | Status |"
+divider="|---|---|---|---|---|---:|---:|---:|---|---|"
+lines=[
+ "# International stock screener — "+str(summary["asof_perth"]),
+ "**Verified opportunities: "+str(len(verified))+"**",
+ "## Qualified tickers for chart review",
+ header,divider,
+]
+if verified:
+    lines.extend(compact_row(x,"verified") for x in sorted(verified,key=lambda z:z["tv_ticker"]))
+else:
+    lines.append("| — | No fully verified opportunities | — | — | — | — | — | — | — | — |")
+lines.extend([
+ "## Technical signals excluded from purchase shortlist",
+ "These pass Supertrend (10,3), TradingView daily Strong Buy, RSI >=50, and close > SMA150; their other requirements remain unverified or failed.",
+ header,divider,
+])
+if technical:
+    lines.extend(compact_row(x,"excluded") for x in sorted(technical,key=lambda z:z["tv_ticker"]))
+else:
+    lines.append("| — | No technical signals | — | — | — | — | — | — | — | — |")
+lines.extend([
+ "## Scan checks",
+ f"- **Data integrity:** {valid}/{mapped} historical price sets analysed ({coverage}%), {failed} failed.",
+ f"- **Market discovery:** {summary['queries_complete']}/{len(discovery)} market/instrument queries complete.",
+ f"- **Exchange calendars:** {len(calerr)} unsupported/error cases.",
+ f"- **Technical signals:** {len(technical)}; liquidity-qualified: {len(liquid)}; broker-verified: {len(verified)}.",
+ f"- **Coverage warning:** {'YES — incomplete' if summary['coverage_warning'] else 'NO for the provider-returned universe'}",
+ "- **No market-wide coverage claim:** data coverage percentage is only for mapped prequalified candidates; missing endpoints and unsupported calendar markets are excluded.",
+ "- The available broker approval list is empty unless separately populated with verified, exact outright-purchase evidence. Unverified signals are not investment opportunities.",
+ "- TradingView Strong Buy scores, market capitalisation and ETF AUM are live screener data, not historical point-in-time values. ETF discovery remains provider-dependent.",
+])
+(ROOT/"latest.md").write_text("\n\n".join(lines)+"\n",encoding="utf-8")
 print("CONSOLIDATED_RESULT",json.dumps({k:v for k,v in summary.items() if k not in ("technical_signals","liquidity_pass_signals","verified_opportunities","calendar_errors")},default=str),flush=True)
