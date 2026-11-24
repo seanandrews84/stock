@@ -65,3 +65,30 @@ def test_broker_requires_specific_proof(tmp_path,monkeypatch):
     monkeypatch.setattr(pipeline,"ROOT",tmp_path)
     now=datetime(2026,11,24,tzinfo=ZoneInfo("Australia/Perth"))
     assert pipeline.eligible_brokers("ABC.X",now)==[]
+
+def test_etf_scanner_field_mapping(monkeypatch):
+    import pipeline
+    class Frame:
+        def __len__(self):return 1
+        def iterrows(self):
+            yield 0,{"Symbol":"ASX:VAS","Name":"VAS","Description":"Vanguard Australian Shares",
+                     "Aum":250000000}
+    class Scanner:
+        def set_markets(self,*args):return self
+        def where(self,*args):return self
+        def set_range(self,*args):return self
+        def get(self):return Frame()
+    monkeypatch.setattr(pipeline,"ETFScreener",lambda:Scanner())
+    rows,stat=pipeline.query_etfs("australia")
+    assert len(rows)==1 and rows[0]["ticker"]=="ASX:VAS"
+    assert rows[0]["fund_total_assets"]==250000000
+    assert stat["complete"] is True
+
+def test_etf_daily_unverified_fails_closed(monkeypatch):
+    import pipeline
+    from types import SimpleNamespace
+    class Handler:
+        def __init__(self,**kwargs):pass
+        def get_analysis(self):return SimpleNamespace(indicators={"Recommend.All":0.49})
+    monkeypatch.setattr(pipeline,"TA_Handler",Handler)
+    assert pipeline.tv_daily_etf_rating("ASX:VAS","australia") is None
