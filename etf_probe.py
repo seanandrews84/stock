@@ -40,3 +40,5 @@ except Exception as e:
 print("ETF_PROBE_RATING_FIELDS",[x.name for x in StockField.search("rating")],flush=True)
 print("ETF_PROBE_RECOMMEND_ALL",[x.name for x in StockField.search("recommend") if "ALL" in x.name],flush=True)
 print("ETF_PROBE_RSI_FIELDS",[x.name for x in StockField.search("rsi")][:20],flush=True)
+
+print("ETF_DAILY_FIELDS",[(k,str(v.value)) for k,v in StockField.__members__.items() if ("RECOMMEND_ALL" in k or "RSI" in k)][:110],flush=True)
